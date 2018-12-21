@@ -10,7 +10,7 @@ Currently supported Löve versions: 11.x
 ### Usage
 
 - `require('fml')()` for the default virtual filesystem roots, or
-- `require('fml')(sav,src,sys)` for user-defined mountpoints for the three virtual filesystem roots.
+- `require('fml')(vfsr_sav, vfsr_src, vfsr_sys)` for user-defined mountpoints for the three virtual filesystem roots.
 
 ### Additions to Filesystem functionality
 
