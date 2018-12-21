@@ -3,9 +3,6 @@
 -- by zorg § ISC @ 2018-
 
 -- TODO:
--- - Check what constructors have path checks in them, because that'd mean all
---   of them need to be reimplemented, or all of this is basically unuseable
---   with those.
 -- - createDirectory dumps itself seemingly into the root of the vfs, but
 --   after a restart, it's in the correct place; fix this.
 
@@ -30,7 +27,7 @@ ffi.cdef(love.filesystem.load(path .. 'physfs_decl.h')())
 -- Virtual FS Root directories (defaults included, renameable in init)
 local vfsr_sys = 'drv' -- Real FS roots, simulated on Windows.
 local vfsr_src = 'src' -- Points to project folder/inside zip (if fused).
-local vfsr_sav = 'usr' -- Points to project save folder (default write dir).
+local vfsr_usr = 'usr' -- Points to project save folder (default write dir).
 
 -- PhysFS-version dependent unmount helper function
 local unmount
@@ -59,44 +56,48 @@ local normalize = function(path)
 	return table.concat(s)
 end
 
--- Windows-exclusive virtual root builder, and its helper functions
--- Note: io.popen is not guaranteed to exist on all systems,
---       hence the failsafe.
-local popen = function(cmd, mode)
-	if io.popen then
-		local tmp = io.popen('dir')
-		if tmp ~= "'popen' not supported" then
-			tmp:close()
-			return io.popen(cmd, mode) -- File handle
-		end
-	end
-	-- Fall back to worse method.
-	local name = os.tmpname()
-	os.execute(cmd .. ' > ' .. name)
-	local file = io.open(name, mode)
-	return file -- File handle
-end
+--[[
 
--- Capture the output of a command / external program.
-local capture = function(cmd, raw)
-	local f = assert(popen(cmd, 'r'))
-	local s = assert(f:read('*a'))
-	f:close()
-	if raw then return s end
-	s = string.gsub(s, '^%s+', '')
-	s = string.gsub(s, '%s+$', '')
-	s = string.gsub(s, '[\n\r]+', ' ')
-	return s
-end
+	-- Windows-exclusive virtual root builder, and its helper functions
+	-- Note: io.popen is not guaranteed to exist on all systems,
+	--       hence the failsafe.
+	local popen = function(cmd, mode)
+		if io.popen then
+			local tmp = io.popen('dir')
+			if tmp ~= "'popen' not supported" then
+				tmp:close()
+				return io.popen(cmd, mode) -- File handle
+			end
+		end
+		-- Fall back to worse method.
+		local name = os.tmpname()
+		os.execute(cmd .. ' > ' .. name)
+		local file = io.open(name, mode)
+		return file -- File handle
+	end
+	
+	-- Capture the output of a command / external program.
+	local capture = function(cmd, raw)
+		local f = assert(popen(cmd, 'r'))
+		local s = assert(f:read('*a'))
+		f:close()
+		if raw then return s end
+		s = string.gsub(s, '^%s+', '')
+		s = string.gsub(s, '%s+$', '')
+		s = string.gsub(s, '[\n\r]+', ' ')
+		return s
+	end
+	
+--]]
 
 -- Use the Windows Management Instrumentation Command-line (WMIC) tool to query
 -- for existing drive letters.
 local getWinDrives = function()
-	--[[
+	--[=[
 	local drives, tmp = {}, capture('wmic logicaldisk get caption', false)
 	for w in string.gmatch(tmp, "%w+") do table.insert(drives, w) end
 	table.remove(drives, 1) -- Initial descriptor word, whatever it might be.
-	--]]
+	--]=]
 
 	-- Alternate method: use PhysFS only, and just enumerate drive letters;
 	-- Those that exist, get mounted, others won't.
@@ -106,14 +107,32 @@ local getWinDrives = function()
 	return drives
 end
 
-
-
+local __mount_drives_hack
 -- Replace Löve's own mount and unmount functions
 love.filesystem.mount = function(path, mountPoint, appendToPath)
 	if liblove.PHYSFS_isInit() == 0 then return false end
 
-	-- Debate: Maybe prevent mounting into the vfsr_sys directory?
-	--         Since it kinda is a reflection of the real file system...
+	-- Get rid of initial slashes.
+	if mountPoint:sub(1,1) == '/' then
+		mountPoint = mountPoint:sub(2)
+	end
+
+	-- We do want to mount the drives to the vfsr_sys dir internally...
+	if not __mount_drives_hack then
+		-- Prevent mounting into the vfsr_sys directory, since it kinda is a
+		-- reflection of the real file system... but only if it's not overlapped
+		-- by the other two virtual roots
+		if vfsr_sys ~= vfsr_src and vfsr_sys ~= vfsr_usr then
+			local same = true
+			for i=1, #vfsr_sys do
+				if vfsr_sys:sub(i,i) ~= mountPoint:sub(i,i) then
+					same = false
+					break
+				end
+			end
+			if same then return false end
+		end
+	end
 
 	local result = liblove.PHYSFS_mount(
 		path, mountPoint, appendToPath and 1 or 0)
@@ -208,7 +227,7 @@ love.filesystem.setIdentity = function(ident, appendToPath)
 	-- Try to add the save directory to the search path.
 	-- (No error on fail, it means that the path doesn't exist).
 	-- zorg: This is basically the only line we needed to change...
-	love.filesystem.mount(save_path_full, vfsr_sav, appendToPath)
+	love.filesystem.mount(save_path_full, vfsr_usr, appendToPath)
 
 	-- HACK: This forces setupWriteDirectory to be called the next time a file
 	-- is opened for writing - otherwise it won't be called at all if it was
@@ -239,28 +258,29 @@ end
 
 
 -- Init function.
-local init = function(sav, src, sys)
+local init = function(usr, src, sys)
 	-- If supplied, use those parameters as virtual root directories.
-	assert(sav == nil or type(sav) == 'string',
+	assert(usr == nil or type(usr) == 'string',
 		"First parameter not nil or string.")
-	assert(sav == nil or type(sav) == 'string',
+	assert(src == nil or type(src) == 'string',
 		"Second parameter not nil or string.")
-	assert(sav == nil or type(sav) == 'string',
+	assert(sys == nil or type(sys) == 'string',
 		"Third parameter not nil or string.")
-	vfsr_sav = sav or vfsr_sav
+	vfsr_usr = usr or vfsr_usr
 	vfsr_src = src or vfsr_src
 	vfsr_sys = sys or vfsr_sys
 
 	-- Re-point both the save and source paths.
-	local sav = love.filesystem.getSaveDirectory()
-	love.filesystem.unmount(sav)
-	love.filesystem.mount(sav, vfsr_sav, true)
+	local usrp = love.filesystem.getSaveDirectory()
+	love.filesystem.unmount(usrp)
+	love.filesystem.mount(usrp, vfsr_usr, true)
 
-	local src = love.filesystem.getSource()
-	love.filesystem.unmount(src)
-	love.filesystem.mount(src, vfsr_src, true)
+	local srcp = love.filesystem.getSource()
+	love.filesystem.unmount(srcp)
+	love.filesystem.mount(srcp, vfsr_src, true)
 
 	-- Mount filesystem roots
+	__mount_drives_hack = true
 	local OS = love.system.getOS()
 	if OS == 'Windows' then
 		-- Will not mount disk drives that are empty / aren't mounted.
@@ -272,10 +292,11 @@ local init = function(sav, src, sys)
 		-- Desperately needs testing.
 		love.filesystem.mount('/', vfsr_sys, true)
 	end
+	__mount_drives_hack = false
 
 	-- Do we need to set the lua and C require paths?
-	local RPath = vfsr_sav .. "/?.lua;" .. vfsr_sav .. "/?/init.lua"
-	if vfsr_src ~= vfsr_sav then
+	local RPath = vfsr_usr .. "/?.lua;" .. vfsr_usr .. "/?/init.lua"
+	if vfsr_src ~= vfsr_usr then
 		RPath = RPath .. vfsr_src .. "/?.lua;" .. vfsr_src .. "/?/init.lua"
 	end
 	love.filesystem.setRequirePath(RPath)
