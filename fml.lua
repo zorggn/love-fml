@@ -102,7 +102,7 @@ local getWinDrives = function()
 	-- Those that exist, get mounted, others won't.
 	-- Upside of this is that it won't flash a console window at all.
 	local drives = {}
-	for i=0,25 do drives[i+1] = string.char(string.byte('A') + i) end
+	for i=0,25 do drives[i+1] = string.char(string.byte('a') + i) end
 	return drives
 end
 
@@ -218,23 +218,23 @@ love.filesystem.setIdentity = function(ident, appendToPath)
 	return true
 end
 
--- Maybe we need to replace delete as well?
+-- Maybe we need to replace delete as well? - not yet anyway...
+--[[
 love.filesystem.remove = function(path)
 	if liblove.PHYSFS_isInit() == 0 then return false end
 
-	local writeDir = liblove.PHYSFS_getWriteDir()
+	local writeDir = ffi.string(liblove.PHYSFS_getWriteDir())
+
+	print('write dir: ' .. writeDir)
 
 	-- Return early if the write directory isn't set.
 	if not writeDir then return false end
-
-	-- Check if the path is the current write directory or not.
-	local match = string.find(path, '^' .. writeDir .. '*')
-	if not match then return false end
 
 	if not liblove.PHYSFS_delete(path) then return false end
 
 	return true
 end
+--]]
 
 
 
