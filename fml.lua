@@ -22,7 +22,7 @@ local ffi = require "ffi"
 local liblove = ffi.os == "Windows" and ffi.load("love") or ffi.C
 
 -- Define PhysFS constants and functions through the FFI.
-ffi.cdef(love.filesystem.load(path .. 'physfs_decl.h')())
+ffi.cdef(love.filesystem.load(path .. '/physfs_decl.h')())
 
 -- Virtual FS Root directories (defaults included, renameable in init)
 local vfsr_sys = 'drv' -- Real FS roots, simulated on Windows.
