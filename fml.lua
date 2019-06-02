@@ -19,7 +19,11 @@ local path = (...):match("(.-)[^%.]+$")
 
 -- FFI löve.
 local ffi = require "ffi"
-local liblove = ffi.os == "Windows" and ffi.load("love") or ffi.C
+local liblove = ffi.C
+if ffi.os == "Windows" then
+	liblove = ffi.load("love")
+	ffi.cdef('int GetLogicalDrives(void);')
+end
 
 -- Define PhysFS constants and functions through the FFI.
 ffi.cdef(love.filesystem.load(path .. '/physfs_decl.h')())
@@ -75,7 +79,7 @@ end
 		local file = io.open(name, mode)
 		return file -- File handle
 	end
-	
+
 	-- Capture the output of a command / external program.
 	local capture = function(cmd, raw)
 		local f = assert(popen(cmd, 'r'))
@@ -87,23 +91,15 @@ end
 		s = string.gsub(s, '[\n\r]+', ' ')
 		return s
 	end
-	
+
 --]]
 
--- Use the Windows Management Instrumentation Command-line (WMIC) tool to query
--- for existing drive letters.
 local getWinDrives = function()
-	--[=[
-	local drives, tmp = {}, capture('wmic logicaldisk get caption', false)
-	for w in string.gmatch(tmp, "%w+") do table.insert(drives, w) end
-	table.remove(drives, 1) -- Initial descriptor word, whatever it might be.
-	--]=]
+	local bits, drives = ffi.C.GetLogicalDrives(), {}
+	for i = 0,25 do
+		drives[#drives + 1] = bit.band(bits, 2^i) > 0 and string.char(65 + i) or nil
+	end
 
-	-- Alternate method: use PhysFS only, and just enumerate drive letters;
-	-- Those that exist, get mounted, others won't.
-	-- Upside of this is that it won't flash a console window at all.
-	local drives = {}
-	for i=0,25 do drives[i+1] = string.char(string.byte('a') + i) end
 	return drives
 end
 
@@ -136,7 +132,7 @@ love.filesystem.mount = function(path, mountPoint, appendToPath)
 
 	local result = liblove.PHYSFS_mount(
 		path, mountPoint, appendToPath and 1 or 0)
-	if result ~= 0 then 
+	if result ~= 0 then
 		return true
 	else
 		return false--, liblove.PHYSFS_getLastError()
@@ -146,7 +142,7 @@ end
 love.filesystem.unmount = function(path)
 	if liblove.PHYSFS_isInit() == 0 then return false end
 	local result = unmount(path)
-	if result ~= 0 then 
+	if result ~= 0 then
 		return true
 	else
 		return false--, liblove.PHYSFS_getLastError()
@@ -161,7 +157,7 @@ love.filesystem.setIdentity = function(ident, appendToPath)
 	local LOVE_APPDATA_FOLDER = (love.system.getOS() == 'Linux') and
 	                            'love' or 'LOVE'
 	local LOVE_PATH_SEPARATOR = '/'
-	
+
 	if liblove.PHYSFS_isInit() == 0 then return false end
 
 	local old_save_path = love.filesystem.getSaveDirectory()
