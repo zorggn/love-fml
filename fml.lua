@@ -97,7 +97,7 @@ end
 local getWinDrives = function()
 	local bits, drives = ffi.C.GetLogicalDrives(), {}
 	for i = 0,25 do
-		drives[#drives + 1] = bit.band(bits, 2^i) > 0 and string.char(65 + i) or nil
+		drives[#drives + 1] = bit.band(bits, 2^i) > 0 and string.char(string.byte('a') + i) or nil
 	end
 
 	return drives
